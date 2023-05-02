@@ -1,0 +1,10 @@
+## docker compose to run an archlinux container
+version: "3.9"
+services:
+  arch:
+    build: .
+    tty: true
+    container_name: confls-arch-dev
+    volumes:
+      - .:/code/confls
+      - ../environments:/code/environments

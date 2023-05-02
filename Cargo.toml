@@ -1,0 +1,17 @@
+[package]
+name = "confls"
+description = "CMD utility to create, restore and swap configuration files easily."
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.71"
+async-recursion = "1.0.4"
+clap = { version = "4.2.5", features = ["derive"] }
+confy = "0.5.1"
+raur = "7.0.0"
+serde = { version = "1.0.160", features = ["derive"] }
+sha256-rs = "1.0.1"
+tokio = { version = "1.28.0", features = ["full"] }
