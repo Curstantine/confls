@@ -15,4 +15,6 @@ CMD utility to create, restore and swap configuration files easily.
 
 ## Specification
 
-- [Environment](./specs/environment.md)
+- [Environment](./spec/environment.md)
+- [Shared](./spec/shared.md)
+- [General](./spec/general.md)

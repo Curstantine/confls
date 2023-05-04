@@ -3,10 +3,15 @@ use clap::{arg, command, Parser};
 #[derive(Debug, Clone, Parser)]
 #[command(author, version, about)]
 pub struct Args {
+    /// Name of the environment to load.
     #[arg(long, short)]
     pub name: String,
-    #[arg(long, default_value = "../environments")]
-    pub environment_dir: String,
+
+    /// Path to the directory containing all the environment configurations.
+    #[arg(long, short)]
+    pub config_dir: String,
+
+    /// Whether to use root actions.
     #[arg(long, default_value_t = true)]
     pub no_root: bool,
 }

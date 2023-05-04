@@ -7,4 +7,4 @@ services:
     container_name: confls-arch-dev
     volumes:
       - .:/code/confls
-      - ../environments:/code/environments
+      - ../configuration/:/code/configuration
