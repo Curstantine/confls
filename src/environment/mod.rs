@@ -7,7 +7,6 @@ use std::{
 };
 use tokio::task::JoinHandle;
 
-use crate::log;
 use structs::{
     Environment, EnvironmentConfig, EnvironmentFiles, SharedEnvironmentConfig,
     SharedEnvironmentFiles,
@@ -95,8 +94,7 @@ impl Environment {
             })
         } else {
             if setup.info.use_shared {
-                log!(
-                    Info,
+                println!(
                     "use_shared was set to true, but no shared directory was found. Ignoring..."
                 );
             }
@@ -144,8 +142,7 @@ impl Environment {
                     if !set.contains(&relative_shared_file) {
                         env_home_files.push(shared_file);
                     } else {
-                        log!(
-                            Info,
+                        println!(
                             "Shared file {:?} is already present in the home directory. Ignoring...",
                             shared_file,
                         );
@@ -190,8 +187,7 @@ impl Environment {
                     if !set.contains(&relative_shared_file) {
                         root_files.push(shared_file);
                     } else {
-                        log!(
-                            Info,
+                        println!(
                             "Shared file {:?} is already present in the root directory. Ignoring...",
                             shared_file,
                         );

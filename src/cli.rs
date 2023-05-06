@@ -1,7 +1,5 @@
 use clap::{arg, command, Args, Parser, Subcommand};
 
-pub mod log;
-
 #[derive(Debug, Clone, Parser)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
