@@ -2,7 +2,9 @@
     "licenser.author": "Curstantine",
     "licenser.license": "GPLv3",
     "cSpell.words": [
+        "confls",
         "confy",
         "raur"
-    ]
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
 }

@@ -63,17 +63,20 @@ impl Default for SharedEnvironmentConfigInfo {
 
 #[derive(Debug, Clone)]
 pub struct SharedEnvironmentFiles {
+    /// Path to the home directory of the shared environment.
     pub home: PathBuf,
+
+    /// Path to the root directory of the shared environment if it exists, and --no-root is not passed.
     pub root: Option<PathBuf>,
     pub config: SharedEnvironmentConfig,
 }
 
 #[derive(Debug, Clone)]
 pub struct Environment {
-    /// Path to the home directory of the user.
+    /// Path to the home directory of the environment.
     pub home: PathBuf,
 
-    /// Path to the root directory if it exists, and --no-root is not passed.
+    /// Path to the root directory of the environment if it exists, and --no-root is not passed.
     pub root: Option<PathBuf>,
 
     /// Shared environment files if it exists and use_shared is true.
@@ -88,5 +91,19 @@ pub struct Environment {
 #[derive(Debug)]
 pub struct EnvironmentFiles {
     pub home: Vec<PathBuf>,
+    pub shared_home: Vec<PathBuf>,
     pub root: Vec<PathBuf>,
+    pub shared_root: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RelatedPath {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct RelatedEnvironmentFiles {
+    pub home: Vec<RelatedPath>,
+    pub root: Vec<RelatedPath>,
 }

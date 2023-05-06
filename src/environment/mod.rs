@@ -12,6 +12,8 @@ use structs::{
     SharedEnvironmentFiles,
 };
 
+use self::structs::{RelatedEnvironmentFiles, RelatedPath};
+
 pub mod structs;
 
 #[async_recursion]
@@ -35,6 +37,12 @@ async fn recursively_collect_files(path: &Path) -> Result<Vec<PathBuf>> {
 
 impl Environment {
     pub async fn from_options(name: &str, conf_dir: &str, no_root: bool) -> Result<Environment> {
+        if name == "shared" || name == "default" {
+            return Err(anyhow!(
+                "{name} is a reserved name and cannot be used as an environment name.",
+            ));
+        }
+
         let dir_path = Path::new(conf_dir);
         if !dir_path.try_exists()? {
             return Err(anyhow!(
@@ -119,15 +127,17 @@ impl Environment {
 
     pub async fn read(&self) -> Result<EnvironmentFiles> {
         let self_arc = Arc::new(self.clone());
+        type Handle = JoinHandle<Result<(Vec<PathBuf>, Vec<PathBuf>)>>;
 
         let self_c = self_arc.clone();
-        let home_handle: JoinHandle<Result<Vec<PathBuf>>> = tokio::task::spawn(async move {
-            let mut env_home_files = recursively_collect_files(&self_c.home).await?;
+        let home_handle: Handle = tokio::task::spawn(async move {
+            let env_home_files = recursively_collect_files(&self_c.home).await?;
+            let mut shared_home_files = Vec::<PathBuf>::new();
 
             if self_c.shared.is_some() {
                 let shared = self_c.shared.as_ref().unwrap();
                 let shared_home = &shared.home;
-                let shared_home_files = recursively_collect_files(shared_home).await?;
+                let shared_files = recursively_collect_files(shared_home).await?;
 
                 let set = HashSet::<PathBuf>::from_iter(
                     env_home_files
@@ -136,42 +146,38 @@ impl Environment {
                         .map(|file| file.strip_prefix(&self_c.home).unwrap().to_path_buf()),
                 );
 
-                for shared_file in shared_home_files {
-                    let relative_shared_file = shared_file.strip_prefix(shared_home)?.to_path_buf();
+                for shared_file in shared_files {
+                    let stripped_shared_file = shared_file.strip_prefix(shared_home)?.to_path_buf();
 
-                    if !set.contains(&relative_shared_file) {
-                        env_home_files.push(shared_file);
-                    } else {
-                        println!(
-                            "Shared file {:?} is already present in the home directory. Ignoring...",
-                            shared_file,
-                        );
+                    if !set.contains(&stripped_shared_file) {
+                        shared_home_files.push(shared_file);
                     }
                 }
             }
 
-            Ok(env_home_files)
+            Ok((env_home_files, shared_home_files))
         });
 
         let self_c = self_arc.clone();
-        let root_handle: JoinHandle<Result<Vec<PathBuf>>> = tokio::task::spawn(async move {
-            let mut root_files = if let Some(root) = &self_c.root {
+        let root_handle: Handle = tokio::task::spawn(async move {
+            let env_root_files = if let Some(root) = &self_c.root {
                 recursively_collect_files(root).await?
             } else {
                 Vec::new()
             };
 
-            let shared_root_files_opt = &self_c
+            let mut shared_root_files = Vec::<PathBuf>::new();
+            let shared_root_path_opt = &self_c
                 .shared
                 .as_ref()
                 .and_then(|shared| shared.root.as_ref());
 
-            if shared_root_files_opt.is_some() {
-                let shared_root = shared_root_files_opt.unwrap();
-                let shared_root_files = recursively_collect_files(shared_root).await?;
+            if shared_root_path_opt.is_some() {
+                let shared_root = shared_root_path_opt.unwrap();
+                let shared_files = recursively_collect_files(shared_root).await?;
 
                 let set =
-                    HashSet::<PathBuf>::from_iter(root_files.clone().into_iter().map(|file| {
+                    HashSet::<PathBuf>::from_iter(env_root_files.clone().into_iter().map(|file| {
                         if let Some(root) = &self_c.root {
                             file.strip_prefix(root).unwrap().to_path_buf()
                         } else {
@@ -181,26 +187,73 @@ impl Environment {
                         }
                     }));
 
-                for shared_file in shared_root_files {
+                for shared_file in shared_files {
                     let relative_shared_file = shared_file.strip_prefix(shared_root)?.to_path_buf();
 
                     if !set.contains(&relative_shared_file) {
-                        root_files.push(shared_file);
-                    } else {
-                        println!(
-                            "Shared file {:?} is already present in the root directory. Ignoring...",
-                            shared_file,
-                        );
+                        shared_root_files.push(shared_file);
                     }
                 }
             }
 
-            Ok(root_files)
+            Ok((env_root_files, shared_root_files))
         });
 
+        let (home, shared_home) = home_handle.await??;
+        let (root, shared_root) = root_handle.await??;
+
         Ok(EnvironmentFiles {
-            home: home_handle.await??,
-            root: root_handle.await??,
+            home,
+            root,
+            shared_home,
+            shared_root,
         })
+    }
+}
+
+impl EnvironmentFiles {
+    pub fn to_related(&self, env: &Environment) -> anyhow::Result<RelatedEnvironmentFiles> {
+        let mut home = Vec::with_capacity(self.home.len() + self.shared_home.len());
+        let mut root = Vec::with_capacity(self.root.len() + self.shared_root.len());
+
+        let user_root_path = Path::new("/");
+        let user_home_path = Path::new("/home").join(&env.setup.info.username);
+
+        for file in &self.home {
+            home.push(RelatedPath {
+                source: file.to_path_buf(),
+                destination: user_home_path.join(file.strip_prefix(&env.home).unwrap()),
+            });
+        }
+
+        if let Some(root_path) = &env.root {
+            for file in &self.root {
+                root.push(RelatedPath {
+                    source: file.to_path_buf(),
+                    destination: user_root_path.join(file.strip_prefix(root_path).unwrap()),
+                })
+            }
+        }
+
+        if let Some(shared) = &env.shared {
+            for file in &self.shared_home {
+                home.push(RelatedPath {
+                    source: file.to_path_buf(),
+                    destination: user_home_path.join(file.strip_prefix(&shared.home).unwrap()),
+                });
+            }
+
+            if let Some(shared_root_path) = &shared.root {
+                for file in &self.shared_root {
+                    root.push(RelatedPath {
+                        source: file.to_path_buf(),
+                        destination: user_root_path
+                            .join(file.strip_prefix(shared_root_path).unwrap()),
+                    });
+                }
+            }
+        }
+
+        Ok(RelatedEnvironmentFiles { home, root })
     }
 }
