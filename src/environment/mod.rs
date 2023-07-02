@@ -168,15 +168,8 @@ impl Environment {
                 );
 
                 for shared_file in shared_files {
-                    let stripped_shared_file = match shared_file.strip_prefix(shared_home) {
-                        Ok(stripped) => stripped.to_path_buf(),
-                        Err(_) => {
-                            return Err(Error::Descriptive(format!(
-                                "Could not strip prefix from shared file: {}",
-                                shared_file.display()
-                            )));
-                        }
-                    };
+                    let stripped_shared_file =
+                        shared_file.strip_prefix(shared_home).unwrap().to_path_buf();
 
                     if !set.contains(&stripped_shared_file) {
                         shared_home_files.push(shared_file);
@@ -217,15 +210,8 @@ impl Environment {
                     }));
 
                 for shared_file in shared_files {
-                    let relative_shared_file = match shared_file.strip_prefix(shared_root) {
-                        Ok(stripped) => stripped.to_path_buf(),
-                        Err(_) => {
-                            return Err(Error::Descriptive(format!(
-                                "Could not strip prefix from shared file: {}",
-                                shared_file.display()
-                            )));
-                        }
-                    };
+                    let relative_shared_file =
+                        shared_file.strip_prefix(shared_root).unwrap().to_path_buf();
 
                     if !set.contains(&relative_shared_file) {
                         shared_root_files.push(shared_file);
