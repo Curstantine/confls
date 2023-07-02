@@ -1,4 +1,3 @@
-use anyhow::{anyhow, Result};
 use async_recursion::async_recursion;
 use std::{
     collections::HashSet,
@@ -8,16 +7,16 @@ use std::{
 use tokio::task::JoinHandle;
 
 use structs::{
-    Environment, EnvironmentConfig, EnvironmentFiles, SharedEnvironmentConfig,
-    SharedEnvironmentFiles,
+    Environment, EnvironmentConfig, EnvironmentFiles, RelatedEnvironmentFiles, RelatedPath,
+    SharedEnvironmentConfig, SharedEnvironmentFiles,
 };
 
-use self::structs::{RelatedEnvironmentFiles, RelatedPath};
+use crate::errors::{self, Error};
 
 pub mod structs;
 
 #[async_recursion]
-async fn recursively_collect_files(path: &Path) -> Result<Vec<PathBuf>> {
+async fn recursively_collect_files(path: &Path) -> errors::Result<Vec<PathBuf>> {
     let mut entries = tokio::fs::read_dir(path).await?;
     let mut files = Vec::<PathBuf>::new();
 
@@ -36,24 +35,31 @@ async fn recursively_collect_files(path: &Path) -> Result<Vec<PathBuf>> {
 }
 
 impl Environment {
-    pub async fn from_options(name: &str, conf_dir: &str, no_root: bool) -> Result<Environment> {
+    pub async fn from_options(
+        name: &str,
+        conf_dir: &str,
+        no_root: bool,
+    ) -> errors::Result<Environment> {
         if name == "shared" || name == "default" {
-            return Err(anyhow!(
-                "{name} is a reserved name and cannot be used as an environment name.",
+            return Err(Error::Descriptive(
+                "{name} is a reserved name and cannot be used as an environment name.".to_string(),
             ));
         }
 
         let dir_path = Path::new(conf_dir);
         if !dir_path.try_exists()? {
-            return Err(anyhow!(
+            return Err(Error::Descriptive(format!(
                 "Could not find the configuration directory at: {}, are you sure it exists?",
                 conf_dir
-            ));
+            )));
         }
 
         let env_root = dir_path.join(name);
         if !env_root.try_exists()? {
-            return Err(anyhow!("No environment found with name: {}", name));
+            return Err(Error::Descriptive(format!(
+                "No environment found with name: {}",
+                name
+            )));
         }
 
         let shared_path = dir_path.join("shared");
@@ -65,28 +71,43 @@ impl Environment {
         let shared_home_path = shared_path.join("home");
         let shared_root_path = shared_path.join("root");
 
-        let setup: EnvironmentConfig = confy::load_path(setup_path)?;
+        let setup: EnvironmentConfig = confy::load_path(setup_path).map_err(|e| {
+            errors::descriptive!(
+                "Failed to load setup.toml, most likely due to a syntax error:\n{}",
+                e
+            )
+        })?;
 
         let destroy: Option<EnvironmentConfig> = if destroy_path.try_exists()? {
-            Some(confy::load_path(destroy_path)?)
+            confy::load_path(destroy_path).map_err(|e| {
+                errors::descriptive!(
+                    "Failed to load destroy.toml, most likely due to a syntax error:\n{}",
+                    e
+                )
+            })?
         } else {
             None
         };
 
-        let home = if home_path.try_exists()? {
-            home_path
-        } else {
-            return Err(anyhow::anyhow!("No home directory found for environment."));
+        if !home_path.try_exists()? {
+            return Err(Error::Descriptive(
+                "No home directory found for environment.".to_string(),
+            ));
         };
 
         let shared = if setup.info.use_shared && shared_path.try_exists()? {
             let shared_config: SharedEnvironmentConfig =
-                confy::load_path(shared_path.join("setup.toml"))?;
+                confy::load_path(shared_path.join("setup.toml")).map_err(|e| {
+                    errors::descriptive!(
+                        "Failed to load shared/setup.toml, most likely due to a syntax error:\n{}",
+                        e
+                    )
+                })?;
 
-            let shared_home = if shared_home_path.try_exists()? {
-                shared_home_path
-            } else {
-                return Err(anyhow::anyhow!("No shared home directory found."));
+            if !shared_home_path.try_exists()? {
+                return Err(Error::Descriptive(
+                    "No shared home directory found.".to_string(),
+                ));
             };
 
             let shared_root = if !no_root && shared_root_path.try_exists()? {
@@ -96,7 +117,7 @@ impl Environment {
             };
 
             Some(SharedEnvironmentFiles {
-                home: shared_home,
+                home: shared_home_path,
                 root: shared_root,
                 config: shared_config,
             })
@@ -117,7 +138,7 @@ impl Environment {
         };
 
         Ok(Environment {
-            home,
+            home: home_path,
             shared,
             root,
             setup,
@@ -125,9 +146,9 @@ impl Environment {
         })
     }
 
-    pub async fn read(&self) -> Result<EnvironmentFiles> {
+    pub async fn read(&self) -> errors::Result<EnvironmentFiles> {
         let self_arc = Arc::new(self.clone());
-        type Handle = JoinHandle<Result<(Vec<PathBuf>, Vec<PathBuf>)>>;
+        type Handle = JoinHandle<errors::Result<(Vec<PathBuf>, Vec<PathBuf>)>>;
 
         let self_c = self_arc.clone();
         let home_handle: Handle = tokio::task::spawn(async move {
@@ -147,7 +168,15 @@ impl Environment {
                 );
 
                 for shared_file in shared_files {
-                    let stripped_shared_file = shared_file.strip_prefix(shared_home)?.to_path_buf();
+                    let stripped_shared_file = match shared_file.strip_prefix(shared_home) {
+                        Ok(stripped) => stripped.to_path_buf(),
+                        Err(_) => {
+                            return Err(Error::Descriptive(format!(
+                                "Could not strip prefix from shared file: {}",
+                                shared_file.display()
+                            )));
+                        }
+                    };
 
                     if !set.contains(&stripped_shared_file) {
                         shared_home_files.push(shared_file);
@@ -188,7 +217,15 @@ impl Environment {
                     }));
 
                 for shared_file in shared_files {
-                    let relative_shared_file = shared_file.strip_prefix(shared_root)?.to_path_buf();
+                    let relative_shared_file = match shared_file.strip_prefix(shared_root) {
+                        Ok(stripped) => stripped.to_path_buf(),
+                        Err(_) => {
+                            return Err(Error::Descriptive(format!(
+                                "Could not strip prefix from shared file: {}",
+                                shared_file.display()
+                            )));
+                        }
+                    };
 
                     if !set.contains(&relative_shared_file) {
                         shared_root_files.push(shared_file);
@@ -212,7 +249,7 @@ impl Environment {
 }
 
 impl EnvironmentFiles {
-    pub fn to_related(&self, env: &Environment) -> anyhow::Result<RelatedEnvironmentFiles> {
+    pub fn to_related(&self, env: &Environment) -> errors::Result<RelatedEnvironmentFiles> {
         let mut home = Vec::with_capacity(self.home.len() + self.shared_home.len());
         let mut root = Vec::with_capacity(self.root.len() + self.shared_root.len());
 
